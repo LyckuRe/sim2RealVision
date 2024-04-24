@@ -58,7 +58,7 @@ class LineSegment():
         p.changeVisualShape(line_body_id, -1, textureUniqueId=self.texture_id)
 
 class SimImage():
-    def __init__(self, texture_path, num_segments=10, line_length=5.0, line_height=0.0, line_width=0.05, bend_angle=30, min_angle=10, img_wh=(256, 256)):
+    def __init__(self, texture_path, num_segments=10, line_length=5.0, line_height=0.0, line_width=0.02, bend_angle=30, min_angle=10, img_wh=(200, 200)):
         self.texture_path = texture_path
 
         # Create a zigzag line using smaller line segments for sharper bends
@@ -113,10 +113,10 @@ class SimImage():
         waypoint_coords = []
         for line_seg in segments:
             waypoint_coords.append(line_seg.basePosition)
-            waypoint_coords.append(line_seg.child_anchor)
+            waypoint_coords.append(np.float16(line_seg.child_anchor))
             line_seg.make_line()
 
-        camera_eye_position = [0, 0, 0.3]
+        camera_eye_position = [0, 0, 0.15]
         camera_target_position = [-0.5, 0, 0]
 
         # Set camera parameters
@@ -127,7 +127,7 @@ class SimImage():
         )
 
         projection_matrix = p.computeProjectionMatrixFOV(
-            fov=60,
+            fov=80,
             aspect=1.0,
             nearVal=0.1,
             farVal=100.0

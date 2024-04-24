@@ -71,8 +71,8 @@ class ResidualBlock(nn.Module):
         self.residual_net = torch.nn.Sequential(OrderedDict(elements))
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        x = self.residual_net(inputs)
-        x += self._down_sample(inputs)
+        x = self.residual_net(inputs.clone())  # Clone the tensor to avoid in-place modification
+        x = x + self._down_sample(inputs)  # Use out-of-place addition
         return self._final_activation(x)
 
 
@@ -159,20 +159,25 @@ class DeepSupervisionNet(nn.Module):
         self.avg_pool = nn.MaxPool2d(kernel_size=5, stride=5)
 
     def forward_with_intermediate_outputs(self, inputs) -> dict:
-        results = {"x1": self.residual_1(self.conv0(inputs))}
-        results["out1"] = self.side_logit_1(results["x1"])
+        results = {}
+        x1 = self.residual_1(self.conv0(inputs))
+        results["x1"] = x1.clone()
+        results["out1"] = self.side_logit_1(x1)
         results["prob1"] = self.sigmoid(results["out1"]).squeeze(dim=1)
 
-        results["x2"] = self.residual_2(results["x1"])
-        results["out2"] = self.side_logit_2(results["x2"])
+        x2 = self.residual_2(results["x1"])
+        results["x2"] = x2.clone()
+        results["out2"] = self.side_logit_2(x2)
         results["prob2"] = self.upsample_2(self.sigmoid(results["out2"])).squeeze(dim=1)
 
-        results["x3"] = self.residual_3(results["x2"])
-        results["out3"] = self.side_logit_3(results["x3"])
+        x3 = self.residual_3(results["x2"])
+        results["x3"] = x3.clone()
+        results["out3"] = self.side_logit_3(x3)
         results["prob3"] = self.upsample_3(self.sigmoid(results["out3"])).squeeze(dim=1)
 
-        results["x4"] = self.residual_4(results["x3"])
-        results["out4"] = self.side_logit_4(results["x4"])
+        x4 = self.residual_4(results["x3"])
+        results["x4"] = x4.clone()
+        results["out4"] = self.side_logit_4(x4)
         results["prob4"] = self.upsample_4(self.sigmoid(results["out4"])).squeeze(dim=1)
 
         final_logit = (
@@ -193,6 +198,10 @@ class DeepSupervisionNet(nn.Module):
                 results["prob3"],
                 results["prob4"],
                 results["final_prob"],
+                results["x1"],
+                results["x2"],
+                results["x3"],
+                results["x4"]
             ]
         else:
             return results["prob4" if self.no_deep_supervision else "final_prob"]
@@ -208,46 +217,3 @@ class DeepSupervisionNet(nn.Module):
         results["projection"] = self.avg_pool(projection)
 
         return results["projection"]
-
-
-class DownstreamNet(nn.Module):
-    def __init__(
-        self,
-        output_size: tuple = (6,),
-        encoder_ckpt_dir: str = None,
-        end_to_end: bool = False,
-        batch_norm: bool = False,
-        no_deep_supervision: bool = False,
-    ):
-        super().__init__()
-        self.global_step = 0
-        self.input_size = (3, 200, 200)
-        self.output_size = output_size
-        self.encoder = DeepSupervisionNet(
-            batch_norm=batch_norm, no_deep_supervision=no_deep_supervision
-        )
-        self.end_to_end = end_to_end
-        self.decoder = nn.Sequential(
-            OrderedDict(
-                [
-                    ("layer_1", nn.Linear(1024, 512)),
-                    ("relu_1", nn.ReLU()),
-                    ("layer_2", nn.Linear(512, self.output_size[0])),
-                ]
-            )
-        )
-        if encoder_ckpt_dir is not None:
-            ckpt = torch.load(
-                encoder_ckpt_dir + "/checkpoint_model.ckpt",
-                map_location=torch.device("cpu"),
-            )
-            self.encoder.load_state_dict(ckpt["state_dict"])
-            print(f"Loaded encoder from {encoder_ckpt_dir}.")
-
-    def forward(self, inputs) -> torch.Tensor:
-        features = (
-            self.encoder.project(inputs, frozen=not self.end_to_end)
-            .squeeze(-1)
-            .squeeze(-1)
-        )
-        return self.decoder(features)
